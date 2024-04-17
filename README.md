@@ -11,6 +11,12 @@ A common way is to connect a USB to Ethernet Adapter to your PC:
 
     PC <---> USB-ETH <---> Flashbox
 
+Configure the USB ETH adatper with the IP `192.168.8.1`.
+(See Ethernet settings -> Change adapter options)
+
+Test the connection with `ping 192.168.8.10` from a console window.
+
+
 # SSH Connection
 
     Username: pi
