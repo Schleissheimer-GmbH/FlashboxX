@@ -144,15 +144,27 @@ The flashbox detects the connected USB stick and starts the script fbx-auto.sh.
 
 You can modify this file to adjust the update process.
 
+## Create backup
+If you have created a working script environment on the flashbox you can use the script 
+update/usb_backup.sh
+to create a backup which gets copied on a connected usb stick.
+
+Following folders are backed up into tar archive:
+* /flashboxx_env/flashfiles
+* /usr/local/bin
+  
+Connect the usb stick to another flashbox to install the same script environment. It sets all LEDs to green and waits for a key press to reboot the flashbox.
+
+
 ## Update flashfiles
 One simple example you can find here:
-update\usb_update\fbx-auto.sh
+update/usb_update/fbx-auto.sh
 
-It copies a new flash file (pdx container) and the flash script to the flashbox. It sets all LEDs to green and wait for a keypress to reboot the flashbox.
+It copies a new flash file (pdx container) and the flash script to the flashbox. It sets all LEDs to green and waits for a key press to reboot the flashbox.
 
 ## Restore the flashbox
-To restore the flashbox you can copy the content the following folder on the USB stick:
-update\usb_restore
+To restore the flashbox you can copy the content of following folder on the USB stick:
+update/usb_restore
 
 After a successfull update and button press it shutsdown the flashbox. You must do a power reset to restart the flashbox.
 
