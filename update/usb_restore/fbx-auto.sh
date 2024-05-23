@@ -33,14 +33,14 @@ if [ -d ${TEMP_DIR} ]; then
   rm -r ${TEMP_DIR}/* >/dev/null 2>&1
   if [ ! $? -eq 0 ]; then
     logger "fbx-auto: ERROR Failed remove files from ${TEMP_DIR}"
-	exit 1
+	  exit 1
   fi
 else
   logger "fbx-auto: Creating ${TEMP_DIR}"
   mkdir -p ${TEMP_DIR} >/dev/null 2>&1
   if [ ! $? -eq 0 ]; then
     logger "fbx-auto: ERROR Cannot create ${TEMP_DIR}"
-	exit 1
+	  exit 1
   fi
 fi
 
@@ -48,12 +48,13 @@ logger "fbx-auto: Extracting ${UPDATE_PACKAGE} to ${TEMP_DIR}"
 tar -xzf ${UPDATE_PACKAGE} -C ${TEMP_DIR}
 
 if [ $? -eq 0 ]; then
-    # Run Updater from Temporary Directory
-    logger "fbx-auto: Running ${UPDATER}"
-    cd ${TEMP_DIR}
-    (su root bash -c "${UPDATER} ${USB_DIR}" >/dev/null 2>&1) & disown
+  # Run Updater from Temporary Directory
+  logger "fbx-auto: Running ${UPDATER}"
+  cd ${TEMP_DIR}
+  (su root bash -c "${UPDATER} ${USB_DIR}" >/dev/null 2>&1) & disown
 else
-    logger "fbx-auto: ERROR: Unpack ${UPDATE_PACKAGE} to ${TEMP_DIR} failed"
+  logger "fbx-auto: ERROR: Unpack ${UPDATE_PACKAGE} to ${TEMP_DIR} failed"
+  exit 1
 fi
 
 exit 0
