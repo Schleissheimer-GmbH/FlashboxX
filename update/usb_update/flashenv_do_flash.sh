@@ -4,17 +4,45 @@
 set -o nounset   # abort on unbound variable
 set -o pipefail  # don't hide errors within pipes
 
-DOIPTA=0x104F
-DOIPSA=0x0E80
-DOIPTIP=fd53:7cb8:383:2::4f
-DOIPSIP=fd53:7cb8:383:2::10
+# TODO: Change target and source address
+DOIPTA=0x103F
+DOIPSA=0x0E81
+
+# TODO: Change target and source ip address
+DOIPTIP=fd53:7cb8:383:2::3f
+DOIPSIP=fd53:7cb8:383:2::11
+
+# TODO: Change source ip used for network management
+# See flashenv_send_nm.py
+NMIPSIP=fd53:7cb8:383:2::58
+
+# TODO: Change expected response for read idents
+EXPECTED_IDENT="E121E121E121B221B315B306"
+
+DOTESTLOOP=0
 PORT="0"
 ROOT_DIR=/flashboxx_env
-EXPECTED_IDENT="B235B235B235B235B304B227"
 
-while getopts p: flag; do
-  case "${flag}" in
-  p) PORT="${OPTARG}" ;;
+usage() { 
+  echo "Usage: $0 [-p <portname>]" 1>&2; exit 1;
+}
+
+while getopts "p:" options; do
+  case "${options}" in
+    p)
+      PORT="${OPTARG}"
+      if [[ $PORT != "0" && $PORT != "1" ]]; then
+        echo "Error: Port must be 0 or 1."
+        usage
+      fi
+      ;;
+    :)
+      echo "Error: -${OPTARG} requires an argument."
+      usage
+      ;;
+    *)
+      usage
+      ;;
   esac
 done
 
@@ -26,22 +54,15 @@ PIDFILE=/var/run/tcpdump_port${PORT}.pid
 LOGDIR=/var/log/flashboxx_env
 LOGFILE=${LOGDIR}/flasher_port${PORT}.log
 DUMPFILE=${LOGDIR}/tcpdump_port${PORT}.pcap
+ODXFILE=""
 
-
-FLASHFOLDER="/flashboxx_env/flashfiles"
-
-# Check if the flash folder contains exactly one file with .pdx extension
-ODX_PARAM=""
-if [ $(find "$FLASHFOLDER" -maxdepth 1 -type f -name "*.pdx" | wc -l) -eq 1 ]; then
-    # Get the name of the file without extension
-    ODXFILE=$(basename "$(find "$FLASHFOLDER" -maxdepth 1 -type f -name "*.pdx")" .pdx)
-    ODX_PARAM="--odx_file $ODXFILE.odx-f"
-fi
+FLASHFOLDER="${ROOT_DIR}/flashfiles"
 
 # Internal Variables
 FAIL_COUNT=0
 SUCCESS_COUNT=0
 
+# shellcheck source=./flashenv_functions.sh
 source "${ROOT_DIR}/flashenv_functions.sh"
 
 function led_blink_running() {
@@ -97,7 +118,11 @@ function wait_until_device_connected() {
         led_blink_error
         TPNOK=0
         $POWERSWITCH Off
-        wait_for_key_press
+        if [ ${DOTESTLOOP} -eq 0 ]; then
+          wait_for_key_press
+        else
+          sleep 5
+        fi
         led_blink_running
         $POWERSWITCH On
         sleep 5
@@ -146,9 +171,16 @@ function setup_broadr() {
   # Disable router advertisements (RA)
   sysctl -w net.ipv6.conf.$BROADRIFNAME.accept_ra=0
 
+  # Disable router forwarding
+  sysctl -w net.ipv6.conf.$BROADRIFNAME.forwarding=0
+
+  # Disable duplicate address detection
+  sysctl -w net.ipv6.conf.$BROADRIFNAME.dad_transmits=0
+
   # Configure Interace with IP and VLAN ID
   ip link add link $BROADRIFNAME name $BROADRIFNAME.2 type vlan id 2
   ip addr add $DOIPSIP/64 dev $BROADRIFNAME.2
+  ip addr add $NMIPSIP/64 dev $BROADRIFNAME.2
 
   # Bring Interface Up
   ip link set dev $BROADRIFNAME up
@@ -156,7 +188,7 @@ function setup_broadr() {
 
 function start_kl15() {
   log "Start KL15 message in background"
-  cangen $CANIFNAME -g 100 -I 3C0 -D 00002000 -L 4 &
+  cangen $CANIFNAME -g 100 -I 3C0 -D 7A000200 -L 4 &
 }
 
 function read_idents() {
@@ -238,22 +270,37 @@ function flash() {
 
   sleep 1
 
+  params=()
+  params+=(--use_eth)
+  params+=(--target_ip)
+  params+=($DOIPTIP)
+  params+=(--source_ip)
+  params+=($DOIPSIP)
+  params+=(--phy_target_address)
+  params+=($DOIPTA)
+  params+=(--datflash_path)
+  params+=($FLASHFOLDER)
+  params+=(--tester_present_cycletime_msec)
+  params+=(0)
+  params+=(--disable_comm_ctrl)
+  params+=(--force_update)
+  params+=(--disable_final_swcheck)
+  params+=(--ECU_reset_mode)
+  params+=(3)
+  params+=(--p2_ext_server)
+  params+=(10000)
+  params+=(--source_address)
+  params+=($DOIPSA)
+  params+=(--disable_prog_date_serial)
+
+
+  if [ -n "$ODXFILE" ]; then
+    params+=(--odx_file)
+    params+=($ODXFILE)
+  fi
+
   log "Start 80126_Flasher"
-  ./tools/80126_Flasher \
-    --use_eth \
-    --target_ip $DOIPTIP \
-    --source_ip $DOIPSIP \
-    --phy_target_address $DOIPTA \
-    --datflash_path ./flashfiles \
-    --tester_present_cycletime_msec 0 \
-    --disable_comm_ctrl \
-    --source_address $DOIPSA \
-    --disable_prog_date_serial \
-    $ODX_PARAM \
-    --force_update \
-    --disable_final_swcheck \
-    --ECU_reset_mode 3 \
-    --p2_ext_server 10000 >>${LOGFILE}
+  ./tools/80126_Flasher "${params[@]}" >>${LOGFILE}
 
   FLASHRESULT=$?
 
@@ -305,6 +352,16 @@ fi
 
 cd ${ROOT_DIR}
 
+# Check if the directory contains exactly one file with .pdx extension
+if [ "$(find "${FLASHFOLDER}" -maxdepth 1 -type f -name "*.pdx" | wc -l)" -eq 1 ]; then
+    # Get the name of the file without extension
+    ODXFILE=$(basename "$(find "$FLASHFOLDER" -maxdepth 1 -type f -name "*.pdx")" .pdx)
+    ODXFILE="${ODXFILE}.odx-f"
+    log "Force flashing odx file '$ODXFILE'"
+else
+    log "Start without odx_file parameter (will search fitting odx file)"
+fi
+
 setup_can
 setup_broadr
 start_kl15
@@ -317,7 +374,9 @@ while true; do
 
   led_blink_ready
 
-  wait_for_key_press
+  if [ ${DOTESTLOOP} -eq 0 ]; then
+    wait_for_key_press
+  fi
 
   led_blink_running
 
@@ -332,7 +391,11 @@ while true; do
     ((SUCCESS_COUNT = SUCCESS_COUNT + 1))
     log "Flash result:OK success_count:${SUCCESS_COUNT} error_count:${FAIL_COUNT}"
     cp ${LOGFILE} ${LOGPREFIX}_flasher_OK.log
-    rm ${DUMPFILE} # remove pcap file on success
+    if [ ${DOTESTLOOP} -eq 0 ]; then
+      rm ${DUMPFILE} # remove pcap file on success
+    else
+      mv ${DUMPFILE} ${LOGPREFIX}_tcpdump_OK.pcap
+    fi
     ${LED_SCRIPT} on green
   else
     ((FAIL_COUNT = FAIL_COUNT + 1))
@@ -345,6 +408,10 @@ while true; do
   # Clear log file
   > ${LOGFILE}
 
-  wait_for_key_press
+  if [ ${DOTESTLOOP} -eq 0 ]; then
+    wait_for_key_press
+  else
+    sleep 60
+  fi
 
 done
